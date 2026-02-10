@@ -1,34 +1,21 @@
-# YouTube Transcript MCP Server
+# yt-transcript-mcp
 
-Fetch YouTube video transcripts directly in Claude Code, Claude Desktop, or OpenCode.
+MCP server that fetches YouTube video transcripts. Works with Claude Code, Claude Desktop, OpenCode, and any MCP-compatible client.
 
 ## Prerequisites
 
-Install `yt-dlp`:
+- **Node.js** 18+
+- **Python 3** (required by yt-dlp, which handles transcript fetching)
+
+## Quick Install
+
+### Claude Code
 
 ```bash
-brew install yt-dlp
+claude mcp add yt-transcript -- npx -y yt-transcript-mcp
 ```
 
-## Installation
-
-### 1. Build the Server
-
-```bash
-cd yt-transcript-mcp
-npm install
-npm run build
-```
-
-### 2. Connect to Your Client
-
-#### Claude Code
-
-```bash
-claude mcp add yt-transcript -- node /Users/ali.alfredji/dev/vibe-code/yt-transcript-mcp/dist/index.js
-```
-
-#### Claude Desktop
+### Claude Desktop
 
 Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -36,34 +23,33 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "yt-transcript": {
-      "command": "node",
-      "args": ["/Users/ali.alfredji/dev/vibe-code/yt-transcript-mcp/dist/index.js"]
+      "command": "npx",
+      "args": ["-y", "yt-transcript-mcp"]
     }
   }
 }
 ```
 
-Restart Claude Desktop.
+Restart Claude Desktop after saving.
 
-#### OpenCode
+### OpenCode
 
-```bash
-opencode mcp add yt-transcript -- node /Users/ali.alfredji/dev/vibe-code/yt-transcript-mcp/dist/index.js
-```
-
-**Or** manually edit `.opencode/config.json`:
+Edit `~/Library/Application Support/opencode/opencode.json`:
 
 ```json
 {
+  "$schema": "https://opencode.ai/config.json",
   "mcp": {
     "yt-transcript": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["/Users/ali.alfredji/dev/vibe-code/yt-transcript-mcp/dist/index.js"]
+      "type": "local",
+      "command": ["npx", "-y", "yt-transcript-mcp"],
+      "enabled": true
     }
   }
 }
 ```
+
+Restart OpenCode after saving.
 
 ## Usage
 
@@ -77,7 +63,23 @@ Once connected, the agent has access to the `get_transcript` tool.
 
 **Tool Parameters:**
 
-- `url` (required): YouTube video URL
-- `lang` (optional): Language code (default: `en`)
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `url`     | Yes      | -       | YouTube video URL |
+| `lang`    | No       | `en`    | Subtitle language code (e.g. `es`, `fr`, `de`, `ja`) |
 
 The tool returns the video title and full transcript as plain text.
+
+## Local Development
+
+```bash
+git clone <repo-url>
+cd yt-transcript-mcp
+npm install
+npm run build
+npm start
+```
+
+## License
+
+MIT

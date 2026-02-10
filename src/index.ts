@@ -7,7 +7,8 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import { mkdtemp, readdir, readFile, rm } from "fs/promises";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 
 const execFileAsync = promisify(execFile);
 
@@ -15,26 +16,23 @@ const execFileAsync = promisify(execFile);
 // Helpers
 // ---------------------------------------------------------------------------
 
-async function findYtDlp(): Promise<string> {
-  // Check common paths on macOS (Homebrew Intel + Apple Silicon) and PATH
-  const candidates = [
-    "yt-dlp",
-    "/opt/homebrew/bin/yt-dlp",
-    "/usr/local/bin/yt-dlp",
-  ];
-
-  for (const candidate of candidates) {
-    try {
-      await execFileAsync(candidate, ["--version"]);
-      return candidate;
-    } catch {
-      // not found here, try next
-    }
+async function checkPython3(): Promise<void> {
+  try {
+    await execFileAsync("python3", ["--version"]);
+  } catch {
+    throw new Error(
+      "Python 3 is required but was not found on your system. " +
+        "yt-dlp depends on Python 3 to run. " +
+        "Please install Python 3: https://www.python.org/downloads/"
+    );
   }
+}
 
-  throw new Error(
-    "yt-dlp is not installed. Install it with: brew install yt-dlp"
-  );
+function getBundledYtDlp(): string {
+  // Get the directory where this script is running from
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  // Go up one level from dist/ to the project root and find yt-dlp
+  return join(__dirname, "..", "yt-dlp");
 }
 
 function isYouTubeUrl(url: string): boolean {
@@ -72,12 +70,13 @@ async function fetchTranscript(
   url: string,
   lang: string
 ): Promise<{ transcript: string; videoTitle: string }> {
-  const ytDlp = await findYtDlp();
+  const ytDlp = getBundledYtDlp();
 
   // Get video title first
   let videoTitle = "Unknown";
   try {
     const { stdout } = await execFileAsync(ytDlp, [
+      "--no-check-certificates",
       "--skip-download",
       "--print",
       "title",
@@ -95,6 +94,7 @@ async function fetchTranscript(
     await execFileAsync(
       ytDlp,
       [
+        "--no-check-certificates",
         "--skip-download",
         "--write-subs",
         "--write-auto-subs",
@@ -202,6 +202,7 @@ server.tool(
 // ---------------------------------------------------------------------------
 
 async function main() {
+  await checkPython3();
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

@@ -1,16 +1,30 @@
 {
   "name": "yt-transcript-mcp",
-  "version": "1.0.0",
-  "description": "MCP server that fetches YouTube video transcripts",
+  "version": "0.1.1",
+  "description": "MCP server that fetches YouTube video transcripts using yt-dlp",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
     "yt-transcript-mcp": "dist/index.js"
   },
+  "files": [
+    "dist/",
+    "yt-dlp"
+  ],
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js"
   },
+  "keywords": [
+    "mcp",
+    "youtube",
+    "transcript",
+    "subtitles",
+    "model-context-protocol",
+    "claude",
+    "ai"
+  ],
+  "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1"
   },
