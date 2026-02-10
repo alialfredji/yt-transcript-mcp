@@ -1,6 +1,6 @@
 {
   "name": "yt-transcript-mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "MCP server that fetches YouTube video transcripts using yt-dlp",
   "type": "module",
   "main": "dist/index.js",
@@ -24,7 +24,16 @@
     "claude",
     "ai"
   ],
+  "author": "Ali Alfredji",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alialfredji/yt-transcript-mcp.git"
+  },
+  "homepage": "https://github.com/alialfredji/yt-transcript-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/alialfredji/yt-transcript-mcp/issues"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1"
   },
