@@ -10,6 +10,11 @@ MCP server that fetches YouTube video transcripts. Works with Claude Code, Claud
 - **Local mode**: stdio transport via `npx` (for desktop apps)
 - **Remote mode**: HTTP/SSE transport (for mobile apps, cloud deployment)
 
+**🔄 Dual transcript extraction methods with automatic fallback:**
+- **yt-dlp**: Python-based binary (works great locally)
+- **youtubei.js**: Pure JavaScript (reliable on cloud servers)
+- **Auto-fallback**: Tries yt-dlp first, falls back to youtubei.js if it fails
+
 ## Quick Install
 
 ### Claude Code
@@ -71,7 +76,45 @@ Once connected, the agent has access to the `get_transcript` tool.
 | `url`     | Yes      | -       | YouTube video URL                                    |
 | `lang`    | No       | `en`    | Subtitle language code (e.g. `es`, `fr`, `de`, `ja`) |
 
-The tool returns the video title and full transcript as plain text.
+The tool returns the video title and full transcript as plain text, along with which method was used.
+
+## Transcript Extraction Methods
+
+This server supports **two methods** for extracting transcripts, with automatic fallback:
+
+### Method 1: yt-dlp (Default, tries first)
+- ✅ Works perfectly on local machines
+- ✅ High-quality VTT subtitle extraction
+- ❌ May fail on cloud servers due to YouTube bot detection
+- ⚙️ Requires Python 3
+
+### Method 2: youtubei.js (Fallback)
+- ✅ Reliable on cloud servers (uses YouTube's InnerTube API)
+- ✅ Pure JavaScript - no Python needed
+- ✅ Better for remote deployments
+- ⚙️ Slightly different transcript format
+
+### Controlling Which Method to Use
+
+Set the `TRANSCRIPT_METHOD` environment variable:
+
+```bash
+# Auto mode (default) - tries yt-dlp, falls back to youtubei.js
+TRANSCRIPT_METHOD=auto
+
+# Force yt-dlp only
+TRANSCRIPT_METHOD=ytdlp
+
+# Force youtubei.js only (recommended for cloud deployment)
+TRANSCRIPT_METHOD=youtubei
+```
+
+**For Render deployment**, add this to your environment variables:
+```
+TRANSCRIPT_METHOD=youtubei
+```
+
+This forces the use of youtubei.js, which is more reliable from cloud server IPs.
 
 ## Remote Deployment
 
@@ -84,9 +127,13 @@ Deploy this MCP server to the cloud for remote access (e.g., from Claude mobile 
 3. Click "New +" → "Web Service"
 4. Connect your GitHub repository
 5. Render will automatically detect the `render.yaml` configuration
-6. Click "Create Web Service"
-7. Wait for deployment to complete
-8. Copy your service URL (e.g., `https://yt-transcript-mcp.onrender.com`)
+6. **IMPORTANT**: Add environment variable:
+   - Key: `TRANSCRIPT_METHOD`
+   - Value: `youtubei`
+   - _(This forces the use of youtubei.js which works better from cloud IPs)_
+7. Click "Create Web Service"
+8. Wait for deployment to complete
+9. Copy your service URL (e.g., `https://yt-transcript-mcp.onrender.com`)
 
 **Configure in Claude Desktop for remote access:**
 

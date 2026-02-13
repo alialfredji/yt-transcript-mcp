@@ -6,4 +6,6 @@ services:
     env:
       - key: NODE_ENV
         value: production
+      - key: TRANSCRIPT_METHOD
+        value: youtubei
     healthCheckPath: /health

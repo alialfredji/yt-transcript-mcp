@@ -12,22 +12,24 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
 import express from "express";
+import { Innertube } from "youtubei.js";
 
 const execFileAsync = promisify(execFile);
+
+// Environment variable to control which method to use
+// Options: "ytdlp", "youtubei", "auto" (default: auto = try ytdlp first, fallback to youtubei)
+const TRANSCRIPT_METHOD = process.env.TRANSCRIPT_METHOD || "auto";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-async function checkPython3(): Promise<void> {
+async function checkPython3(): Promise<boolean> {
   try {
     await execFileAsync("python3", ["--version"]);
+    return true;
   } catch {
-    throw new Error(
-      "Python 3 is required but was not found on your system. " +
-        "yt-dlp depends on Python 3 to run. " +
-        "Please install Python 3: https://www.python.org/downloads/"
-    );
+    return false;
   }
 }
 
@@ -40,6 +42,23 @@ function getBundledYtDlp(): string {
 
 function isYouTubeUrl(url: string): boolean {
   return /youtube\.com|youtu\.be/.test(url);
+}
+
+/**
+ * Extract video ID from YouTube URL
+ */
+function extractVideoId(url: string): string | null {
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/,
+    /^([a-zA-Z0-9_-]{11})$/  // Direct video ID
+  ];
+  
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match) return match[1];
+  }
+  
+  return null;
 }
 
 /**
@@ -69,10 +88,79 @@ function vttToPlainText(vtt: string): string {
     .join("\n");
 }
 
-async function fetchTranscript(
+/**
+ * Fetch transcript using youtubei.js (YouTube InnerTube API)
+ * This method is more reliable from cloud servers
+ */
+async function fetchTranscriptWithYoutubeIjs(
   url: string,
   lang: string
 ): Promise<{ transcript: string; videoTitle: string }> {
+  const videoId = extractVideoId(url);
+  
+  if (!videoId) {
+    throw new Error("Could not extract video ID from URL");
+  }
+
+  const youtube = await Innertube.create();
+  const info = await youtube.getInfo(videoId);
+
+  // Get video title
+  const videoTitle = info.basic_info.title || "Unknown";
+
+  // Get transcript
+  const transcriptData = await info.getTranscript();
+  
+  if (!transcriptData) {
+    throw new Error(`No ${lang} subtitles found for this video. The video may not have subtitles available.`);
+  }
+
+  // Find the requested language track or fall back to any available
+  const content = transcriptData.transcript?.content;
+  
+  if (!content || !content.body) {
+    throw new Error("Transcript data is empty or malformed");
+  }
+
+  // Extract text from transcript segments
+  const segments = content.body.initial_segments;
+  
+  if (!segments || segments.length === 0) {
+    throw new Error("No transcript segments found");
+  }
+
+  // Combine all transcript segments into plain text
+  const transcript = segments
+    .map((segment: any) => {
+      const text = segment.snippet?.text?.toString() || "";
+      return text.trim();
+    })
+    .filter(Boolean)
+    .join(" ");
+
+  if (!transcript) {
+    throw new Error("Transcript is empty after processing");
+  }
+
+  return { transcript, videoTitle };
+}
+
+/**
+ * Fetch transcript using yt-dlp binary (works well locally, may fail on cloud servers)
+ */
+async function fetchTranscriptWithYtDlp(
+  url: string,
+  lang: string
+): Promise<{ transcript: string; videoTitle: string }> {
+  // Check if Python 3 is available
+  const hasPython = await checkPython3();
+  if (!hasPython) {
+    throw new Error(
+      "Python 3 is required for yt-dlp but was not found. " +
+      "Either install Python 3 or use TRANSCRIPT_METHOD=youtubei to use the JavaScript-based method."
+    );
+  }
+
   const ytDlp = getBundledYtDlp();
 
   // Get video title first
@@ -145,6 +233,58 @@ async function fetchTranscript(
   }
 }
 
+/**
+ * Main transcript fetching function with fallback support
+ * Tries yt-dlp first, falls back to youtubei.js if it fails
+ * Can be controlled via TRANSCRIPT_METHOD env var
+ */
+async function fetchTranscript(
+  url: string,
+  lang: string
+): Promise<{ transcript: string; videoTitle: string; method: string }> {
+  // Force specific method if requested
+  if (TRANSCRIPT_METHOD === "ytdlp") {
+    console.error("Using yt-dlp (forced via TRANSCRIPT_METHOD)");
+    const result = await fetchTranscriptWithYtDlp(url, lang);
+    return { ...result, method: "yt-dlp" };
+  }
+
+  if (TRANSCRIPT_METHOD === "youtubei") {
+    console.error("Using youtubei.js (forced via TRANSCRIPT_METHOD)");
+    const result = await fetchTranscriptWithYoutubeIjs(url, lang);
+    return { ...result, method: "youtubei.js" };
+  }
+
+  // Auto mode: try yt-dlp first, fallback to youtubei.js
+  console.error("Attempting yt-dlp first...");
+  
+  try {
+    const result = await fetchTranscriptWithYtDlp(url, lang);
+    console.error("✓ Success with yt-dlp");
+    return { ...result, method: "yt-dlp" };
+  } catch (ytdlpError) {
+    const errorMessage = ytdlpError instanceof Error ? ytdlpError.message : String(ytdlpError);
+    console.error(`✗ yt-dlp failed: ${errorMessage}`);
+    console.error("Falling back to youtubei.js...");
+    
+    try {
+      const result = await fetchTranscriptWithYoutubeIjs(url, lang);
+      console.error("✓ Success with youtubei.js");
+      return { ...result, method: "youtubei.js (fallback)" };
+    } catch (youtubeiError) {
+      const youtubeiMessage = youtubeiError instanceof Error ? youtubeiError.message : String(youtubeiError);
+      console.error(`✗ youtubei.js also failed: ${youtubeiMessage}`);
+      
+      // Both methods failed, throw combined error
+      throw new Error(
+        `All transcript methods failed.\n` +
+        `yt-dlp: ${errorMessage}\n` +
+        `youtubei.js: ${youtubeiMessage}`
+      );
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // MCP Server Factory
 // ---------------------------------------------------------------------------
@@ -185,13 +325,13 @@ function createServer(): McpServer {
       }
 
       try {
-        const { transcript, videoTitle } = await fetchTranscript(url, lang);
+        const { transcript, videoTitle, method } = await fetchTranscript(url, lang);
 
         return {
           content: [
             {
               type: "text" as const,
-              text: `# Transcript: ${videoTitle}\n\n${transcript}`,
+              text: `# Transcript: ${videoTitle}\n\n_Fetched via: ${method}_\n\n${transcript}`,
             },
           ],
         };
@@ -219,7 +359,6 @@ function createServer(): McpServer {
 // ---------------------------------------------------------------------------
 
 async function startStdioServer() {
-  await checkPython3();
   const server = createServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
@@ -227,7 +366,6 @@ async function startStdioServer() {
 }
 
 async function startHttpServer() {
-  await checkPython3();
   
   const app = express();
   app.use(express.json());
