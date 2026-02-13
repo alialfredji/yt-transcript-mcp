@@ -2,6 +2,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -9,6 +10,8 @@ import { mkdtemp, readdir, readFile, rm } from "fs/promises";
 import { tmpdir } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { randomUUID } from "crypto";
+import express from "express";
 
 const execFileAsync = promisify(execFile);
 
@@ -133,78 +136,172 @@ async function fetchTranscript(
 }
 
 // ---------------------------------------------------------------------------
-// MCP Server
+// MCP Server Factory
 // ---------------------------------------------------------------------------
 
-const server = new McpServer({
-  name: "yt-transcript",
-  version: "1.0.0",
-});
+function createServer(): McpServer {
+  const server = new McpServer({
+    name: "yt-transcript",
+    version: "1.0.0",
+  });
 
-server.tool(
-  "get_transcript",
-  "Fetch the transcript / subtitles of a YouTube video. Returns the full plain-text transcript that you can then summarize, analyze, or answer questions about.",
-  {
-    url: z
-      .string()
-      .describe(
-        "YouTube video URL (e.g. https://www.youtube.com/watch?v=... or https://youtu.be/...)"
-      ),
-    lang: z
-      .string()
-      .default("en")
-      .describe(
-        'Subtitle language code (default: "en"). Examples: "en", "es", "fr", "de", "ja"'
-      ),
-  },
-  async ({ url, lang }) => {
-    if (!isYouTubeUrl(url)) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: "Error: The provided URL does not appear to be a YouTube link. Please provide a youtube.com or youtu.be URL.",
-          },
-        ],
-        isError: true,
-      };
+  server.tool(
+    "get_transcript",
+    "Fetch the transcript / subtitles of a YouTube video. Returns the full plain-text transcript that you can then summarize, analyze, or answer questions about.",
+    {
+      url: z
+        .string()
+        .describe(
+          "YouTube video URL (e.g. https://www.youtube.com/watch?v=... or https://youtu.be/...)"
+        ),
+      lang: z
+        .string()
+        .default("en")
+        .describe(
+          'Subtitle language code (default: "en"). Examples: "en", "es", "fr", "de", "ja"'
+        ),
+    },
+    async ({ url, lang }) => {
+      if (!isYouTubeUrl(url)) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "Error: The provided URL does not appear to be a YouTube link. Please provide a youtube.com or youtu.be URL.",
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      try {
+        const { transcript, videoTitle } = await fetchTranscript(url, lang);
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `# Transcript: ${videoTitle}\n\n${transcript}`,
+            },
+          ],
+        };
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : String(error);
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Error fetching transcript: ${message}`,
+            },
+          ],
+          isError: true,
+        };
+      }
     }
+  );
 
+  return server;
+}
+
+// ---------------------------------------------------------------------------
+// Transport Modes
+// ---------------------------------------------------------------------------
+
+async function startStdioServer() {
+  await checkPython3();
+  const server = createServer();
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.error("MCP server running on stdio");
+}
+
+async function startHttpServer() {
+  await checkPython3();
+  
+  const app = express();
+  app.use(express.json());
+
+  // Session management
+  const transports = new Map<string, StreamableHTTPServerTransport>();
+
+  // Health check endpoint
+  app.get("/health", (_req, res) => {
+    res.json({ status: "ok" });
+  });
+
+  // MCP endpoint
+  app.all("/mcp", async (req, res) => {
     try {
-      const { transcript, videoTitle } = await fetchTranscript(url, lang);
+      const sessionId = req.headers["mcp-session-id"] as string | undefined;
+      let transport: StreamableHTTPServerTransport;
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `# Transcript: ${videoTitle}\n\n${transcript}`,
+      if (sessionId && transports.has(sessionId)) {
+        transport = transports.get(sessionId)!;
+      } else if (!sessionId && req.method === "POST" && isInitializeRequest(req.body)) {
+        transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => randomUUID(),
+          onsessioninitialized: (newSessionId) => {
+            console.error(`Session initialized: ${newSessionId}`);
+            transports.set(newSessionId, transport);
           },
-        ],
-      };
+        });
+
+        transport.onclose = () => {
+          const sid = transport.sessionId;
+          if (sid && transports.has(sid)) {
+            console.error(`Session closed: ${sid}`);
+            transports.delete(sid);
+          }
+        };
+
+        const server = createServer();
+        await server.connect(transport);
+      } else {
+        res.status(400).json({
+          jsonrpc: "2.0",
+          error: { code: -32000, message: "Bad Request" },
+          id: null,
+        });
+        return;
+      }
+
+      await transport.handleRequest(req, res, req.body);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : String(error);
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Error fetching transcript: ${message}`,
-          },
-        ],
-        isError: true,
-      };
+      console.error("Error handling MCP request:", error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          jsonrpc: "2.0",
+          error: { code: -32603, message: "Internal error" },
+          id: null,
+        });
+      }
     }
-  }
-);
+  });
+
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.error(`MCP HTTP server listening on port ${PORT}`);
+    console.error(`Endpoint: http://localhost:${PORT}/mcp`);
+  });
+}
+
+function isInitializeRequest(body: any): boolean {
+  return body && body.method === "initialize";
+}
 
 // ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
 
 async function main() {
-  await checkPython3();
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  const isHttpMode = process.argv.includes("--http") || process.env.PORT !== undefined;
+  
+  if (isHttpMode) {
+    await startHttpServer();
+  } else {
+    await startStdioServer();
+  }
 }
 
 main().catch((error) => {

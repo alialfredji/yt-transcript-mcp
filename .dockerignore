@@ -1,0 +1,33 @@
+# Dependencies
+node_modules
+npm-debug.log
+
+# Build outputs
+dist
+
+# Development files
+.git
+.github
+.gitignore
+.claude
+.opencode
+openspec
+
+# Documentation
+*.md
+!README.md
+
+# Environment files
+.env
+.env.*
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

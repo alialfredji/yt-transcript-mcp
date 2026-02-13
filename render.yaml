@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: yt-transcript-mcp
+    runtime: docker
+    plan: free
+    env:
+      - key: NODE_ENV
+        value: production
+    healthCheckPath: /health
