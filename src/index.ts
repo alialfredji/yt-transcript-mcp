@@ -83,6 +83,10 @@ async function fetchTranscript(
       "--skip-download",
       "--print",
       "title",
+      "--extractor-args",
+      "youtube:player_client=android",
+      "--user-agent",
+      "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36",
       url,
     ]);
     videoTitle = stdout.trim();
@@ -107,6 +111,12 @@ async function fetchTranscript(
         "vtt",
         "-o",
         join(tmpDir, "sub"),
+        // Use Android player client to bypass bot detection
+        "--extractor-args",
+        "youtube:player_client=android",
+        // Add user agent to appear more legitimate
+        "--user-agent",
+        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.144 Mobile Safari/537.36",
         url,
       ],
       { timeout: 60_000 }
